@@ -1,10 +1,34 @@
-# ComfyUI-IAI666-Tools
+# ComfyUI-IAI666-Tools ✨
 
-ComfyUI 自定义节点工具包，提供批量图片加载、提示词队列、文本处理等实用功能。
+一个用于批量处理提示词、批量创建任务并逐一生成结果的 ComfyUI 自定义节点集合。
 
-**作者：** numibuc144-afk
+感谢 B 站 UP 主 **AICoser 小姐姐** 原创节点和教学视频
 
-**版本：** v1.0.1（修复版）
+---
+
+## 🌟 功能特性
+- **批量提示词节点**：支持批量加载/处理提示词，避免重复操作
+- **任务队列管理**：创建多个生成任务，按顺序逐个执行
+- **逐一生成结果**：执行时依次生成每张图片，便于调试和结果管理
+- **前端界面集成**：提供简洁的 Web 界面，方便查看任务队列和进度
+
+---
+
+## 📦 本次更新（v1.0.1 by numibuc144-afk）
+
+### 🔧 修复内容
+- **修复 None 值崩溃问题**：`VALIDATE_INPUTS`、`load_images`、`IS_CHANGED` 方法中 `index` 参数为 `None` 时会导致类型比较崩溃（`'<' not supported between instances of 'NoneType' and 'int'`）
+- **增强循环节点兼容性**：现在可以与 `comfyui-easy-use` 的 For/While 循环节点完美配合使用
+
+### 🎯 问题场景
+当 `BatchLoadImages` 节点放在 For 循环内部时，ComfyUI 在验证阶段会传入 `None` 值给 `index` 参数，导致验证失败，工作流无法运行。
+
+### ✅ 修复方案
+在三个方法开头添加 None 值保护：
+```python
+if index is None:
+    index = 0
+```
 
 ## 📦 包含节点
 
@@ -176,11 +200,11 @@ ForLoopEnd
 
 ## 📝 更新日志
 
-### v1.0.1
+### v1.0.1（by numibuc144-afk）
 - 修复 `VALIDATE_INPUTS`、`load_images`、`IS_CHANGED` 方法中 `index` 参数为 `None` 时的崩溃问题
-- 增强循环节点兼容性
+- 增强循环节点兼容性，支持与 `comfyui-easy-use` 的 For/While 循环节点配合使用
 
-### v1.0.0
+### v1.0.0（原版 by AICoser 小姐姐）
 - 初始版本
 - 支持 BatchLoadImages、PromptQueue、TextList、SplitLines 四个节点
 
@@ -194,4 +218,5 @@ MIT License
 
 ## 🙏 致谢
 
-感谢 ComfyUI 社区的支持！
+- 感谢 B 站 UP 主 **AICoser 小姐姐** 原创节点和教学视频
+- 感谢 ComfyUI 社区的支持！
