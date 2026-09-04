@@ -181,6 +181,31 @@ function setImageList(node, names) {
     w.callback?.(w.value);
 }
 
+function getImageMoveTarget(length, fromIndex, insertIndex) {
+    if (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex >= length) return fromIndex;
+    let target = Math.max(0, Math.min(Number(insertIndex) || 0, length));
+    if (fromIndex < target) target -= 1;
+    return Math.max(0, Math.min(target, length - 1));
+}
+
+function moveImage(names, fromIndex, insertIndex) {
+    const next = Array.from(names || []);
+    if (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex >= next.length) return next;
+
+    const target = getImageMoveTarget(next.length, fromIndex, insertIndex);
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(target, 0, moved);
+    return next;
+}
+
+function getIndexAfterImageMove(index, fromIndex, targetIndex) {
+    if (!Number.isInteger(index)) return index;
+    if (index === fromIndex) return targetIndex;
+    if (fromIndex < index && index <= targetIndex) return index - 1;
+    if (targetIndex <= index && index < fromIndex) return index + 1;
+    return index;
+}
+
 function getMaxImagesValue(node) {
     const w = node?.widgets?.find((x) => x.name === "max_images");
     const v = w?.value;
@@ -318,7 +343,6 @@ function ensureGlobalDragDropPrevention() {
             const files = Array.from(e.dataTransfer?.files || []);
             if (files.length === 0) return;
             await uploadFilesSequential(hit.node, files, { replace: false });
-            hit.redraw?.();
         },
         { capture: true }
     );
@@ -424,12 +448,17 @@ function openFolderSelect(node, { replace = false } = {}) {
 }
 
 function createBrowserUI(node) {
+    const imageReorderMime = "application/x-iai666-image-index";
+    let draggedCell = null;
+    let dragFromIndex = null;
+    let dropIndicator = null;
+
     const container = document.createElement("div");
     container.style.cssText =
-        "width:100%;padding:8px;background:var(--comfy-menu-bg);border:1px solid var(--border-color);border-radius:6px;margin:5px 0;pointer-events:auto;";
+        "width:100%;height:100%;min-height:220px;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;padding:8px;background:var(--comfy-menu-bg);border:1px solid var(--border-color);border-radius:6px;margin:5px 0;pointer-events:auto;";
 
     const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:6px;margin-bottom:8px;";
+    btnRow.style.cssText = "display:flex;flex:0 0 auto;flex-wrap:wrap;gap:6px;margin-bottom:8px;";
 
     const mkBtn = (label) => {
         const b = document.createElement("button");
@@ -439,34 +468,81 @@ function createBrowserUI(node) {
         return b;
     };
 
-    const replaceBtn = mkBtn("选择图片");
-    const addBtn = mkBtn("追加图片");
+    const uploadBtn = mkBtn("上传");
     const folderBtn = mkBtn("选择文件夹");
+    const pasteBtn = mkBtn("粘贴");
+    const queueOneBtn = mkBtn("单张入队");
     const queueBtn = mkBtn("逐张入队");
-    const queueOneBtn = mkBtn("入队当前");
 
     const clearBtn = document.createElement("button");
     clearBtn.textContent = "清空";
     clearBtn.style.cssText =
         "padding:8px;background:var(--comfy-input-bg);color:var(--input-text);border:1px solid var(--border-color);border-radius:4px;cursor:pointer;font-size:13px;";
 
-    btnRow.appendChild(replaceBtn);
-    btnRow.appendChild(addBtn);
+    btnRow.appendChild(uploadBtn);
     btnRow.appendChild(folderBtn);
-    btnRow.appendChild(queueBtn);
+    btnRow.appendChild(pasteBtn);
     btnRow.appendChild(queueOneBtn);
+    btnRow.appendChild(queueBtn);
     btnRow.appendChild(clearBtn);
 
     const info = document.createElement("div");
-    info.style.cssText = "font-size:12px;opacity:0.85;margin-bottom:6px;";
+    info.style.cssText = "flex:0 0 auto;font-size:12px;opacity:0.85;margin-bottom:6px;";
 
     const grid = document.createElement("div");
     grid.style.cssText =
-        "display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;max-height:260px;overflow-y:auto;background:var(--comfy-input-bg);padding:6px;border-radius:4px;";
+        "display:grid;flex:1 1 auto;min-height:0;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));grid-auto-rows:minmax(110px,1fr);align-content:stretch;gap:6px;overflow-y:auto;background:var(--comfy-input-bg);padding:6px;border-radius:4px;";
 
     const updateInfo = () => {
         const names = parseImageList(getImageListWidget(node)?.value);
-        info.textContent = `已选择 ${names.length} 张（可拖拽图片到此面板/节点上）`;
+        info.textContent = `已选择 ${names.length} 张（拖拽缩略图可排序）`;
+    };
+
+    const updateSelectedCell = () => {
+        const selectedIndex = Number(getWidgetByName(node, "index")?.value);
+        for (const cell of grid.children) {
+            const isSelected = Number(cell.dataset.imageIndex) === selectedIndex;
+            cell.style.outline = isSelected ? "2px solid #4caf7a" : "";
+            cell.style.outlineOffset = isSelected ? "-2px" : "";
+            cell.setAttribute("aria-selected", String(isSelected));
+        }
+    };
+
+    const clearDropIndicator = () => {
+        if (dropIndicator?.cell) dropIndicator.cell.style.boxShadow = "";
+        dropIndicator = null;
+        grid.style.outline = "";
+    };
+
+    const showDropIndicator = (cell, side) => {
+        if (dropIndicator?.cell === cell && dropIndicator?.side === side) return;
+        clearDropIndicator();
+        cell.style.boxShadow = side === "after" ? "inset -4px 0 #4caf7a" : "inset 4px 0 #4caf7a";
+        dropIndicator = { cell, side };
+    };
+
+    const finishReorderDrag = () => {
+        clearDropIndicator();
+        if (draggedCell) draggedCell.style.opacity = "";
+        draggedCell = null;
+        dragFromIndex = null;
+    };
+
+    const commitReorder = (fromIndex, insertIndex) => {
+        const names = parseImageList(getImageListWidget(node)?.value);
+        const next = moveImage(names, fromIndex, insertIndex);
+        const changed = next.some((name, idx) => name !== names[idx]);
+        finishReorderDrag();
+        if (!changed) return;
+
+        const indexWidget = getWidgetByName(node, "index");
+        if (indexWidget) {
+            const targetIndex = getImageMoveTarget(names.length, fromIndex, insertIndex);
+            const selectedIndex = Number(indexWidget.value);
+            indexWidget.value = getIndexAfterImageMove(selectedIndex, fromIndex, targetIndex);
+            indexWidget.callback?.(indexWidget.value);
+        }
+        setImageList(node, next);
     };
 
     const redraw = () => {
@@ -476,27 +552,92 @@ function createBrowserUI(node) {
         const frag = document.createDocumentFragment();
         names.forEach((name, idx) => {
             const cell = document.createElement("div");
-            cell.style.cssText = "display:flex;flex-direction:column;gap:3px;";
+            cell.style.cssText =
+                "display:flex;min-width:0;min-height:0;flex-direction:column;gap:3px;cursor:grab;user-select:none;transition:opacity .12s ease,box-shadow .12s ease;";
+            cell.draggable = true;
+            cell.dataset.imageIndex = String(idx);
+            cell.title = `拖拽调整顺序：${name}`;
+            cell.setAttribute("role", "option");
+
+            cell.addEventListener("click", (e) => {
+                if (e.target?.closest?.("button")) return;
+                const indexWidget = getWidgetByName(node, "index");
+                if (!indexWidget) return;
+                indexWidget.value = idx;
+                indexWidget.callback?.(idx);
+                updateSelectedCell();
+                app.graph.setDirtyCanvas(true);
+            });
+
+            cell.addEventListener("dragstart", (e) => {
+                if (e.target?.closest?.("button")) {
+                    e.preventDefault();
+                    return;
+                }
+                dragFromIndex = idx;
+                draggedCell = cell;
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData(imageReorderMime, String(idx));
+                    e.dataTransfer.setData("text/plain", name);
+                }
+                requestAnimationFrame(() => {
+                    if (draggedCell === cell) cell.style.opacity = "0.45";
+                });
+            });
+
+            cell.addEventListener("dragover", (e) => {
+                if (dragFromIndex === null || isFilesDragEvent(e)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+                const rect = cell.getBoundingClientRect();
+                const side = e.clientX >= rect.left + rect.width / 2 ? "after" : "before";
+                showDropIndicator(cell, side);
+            });
+
+            cell.addEventListener("drop", (e) => {
+                if (dragFromIndex === null || isFilesDragEvent(e)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const encodedIndex = e.dataTransfer?.getData(imageReorderMime);
+                const fromIndex = encodedIndex === "" ? dragFromIndex : Number(encodedIndex);
+                const rect = cell.getBoundingClientRect();
+                const insertAfter = e.clientX >= rect.left + rect.width / 2;
+                commitReorder(fromIndex, idx + (insertAfter ? 1 : 0));
+            });
+
+            cell.addEventListener("dragend", finishReorderDrag);
 
             const thumb = document.createElement("div");
             thumb.style.cssText =
-                "position:relative;aspect-ratio:1;border-radius:4px;overflow:hidden;border:1px solid var(--border-color);background:#000;";
+                "position:relative;flex:1 1 auto;min-height:72px;border-radius:4px;overflow:hidden;border:1px solid var(--border-color);background:#000;";
 
             const img = document.createElement("img");
             img.src = getViewUrl(name);
-            img.style.cssText = "width:100%;height:100%;object-fit:cover;display:block;";
+            img.draggable = false;
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.style.cssText = "width:100%;height:100%;object-fit:contain;display:block;";
 
             const del = document.createElement("button");
             del.textContent = "×";
             del.title = "删除";
+            del.draggable = false;
             del.style.cssText =
                 "position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(255,0,0,0.75);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:16px;line-height:1;";
             del.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 const next = names.slice(0, idx).concat(names.slice(idx + 1));
+                const indexWidget = getWidgetByName(node, "index");
+                if (indexWidget) {
+                    const selectedIndex = Number(indexWidget.value);
+                    const nextIndex = selectedIndex > idx ? selectedIndex - 1 : Math.min(selectedIndex, next.length - 1);
+                    indexWidget.value = Math.max(0, nextIndex);
+                    indexWidget.callback?.(indexWidget.value);
+                }
                 setImageList(node, next);
-                redraw();
             };
 
             const label = document.createElement("div");
@@ -513,14 +654,45 @@ function createBrowserUI(node) {
         });
 
         grid.appendChild(frag);
+        updateSelectedCell();
         updateInfo();
         app.graph.setDirtyCanvas(true);
     };
 
+    const isAfterLastCard = (e) => {
+        const lastCell = grid.lastElementChild;
+        if (!lastCell) return false;
+        const rect = lastCell.getBoundingClientRect();
+        return e.clientY > rect.bottom || (e.clientY >= rect.top && e.clientX > rect.right);
+    };
+
+    // Dropping in the free area after the last card moves the image to the end.
+    grid.addEventListener("dragover", (e) => {
+        if (dragFromIndex === null || isFilesDragEvent(e) || e.target !== grid) return;
+        if (!isAfterLastCard(e)) {
+            clearDropIndicator();
+            return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        clearDropIndicator();
+        grid.style.outline = "2px dashed #4caf7a";
+    });
+
+    grid.addEventListener("drop", (e) => {
+        if (dragFromIndex === null || isFilesDragEvent(e) || e.target !== grid || !isAfterLastCard(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const encodedIndex = e.dataTransfer?.getData(imageReorderMime);
+        const fromIndex = encodedIndex === "" ? dragFromIndex : Number(encodedIndex);
+        const names = parseImageList(getImageListWidget(node)?.value);
+        commitReorder(fromIndex, names.length);
+    });
+
     const handleDropFiles = async (files, { replace = false } = {}) => {
         if (!files || files.length === 0) return;
         await uploadFilesSequential(node, files, { replace });
-        redraw();
     };
 
     // Most reliable: handle drop on our DOM panel.
@@ -538,18 +710,65 @@ function createBrowserUI(node) {
         await handleDropFiles(files, { replace: false });
     });
 
+    // 支持 Ctrl+V 粘贴图片（需要先点击节点获得焦点）
+    container.addEventListener("paste", async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+
+        const items = Array.from(e.clipboardData?.items || []);
+        const imageFiles = [];
+        for (const item of items) {
+            if (item.type.startsWith("image/")) {
+                const file = item.getAsFile();
+                if (file) {
+                    const ext = file.type.split("/")[1] || "png";
+                    const timestamp = Date.now();
+                    const newFile = new File([file], `paste_${timestamp}.${ext}`, { type: file.type });
+                    imageFiles.push(newFile);
+                }
+            }
+        }
+        if (imageFiles.length > 0) {
+            await uploadFilesSequential(node, imageFiles, { replace: false });
+        }
+    }, true);
+
     const setDragging = (on) => {
         container.style.border = on ? "2px dashed #4a6" : "1px solid var(--border-color)";
     };
 
-    replaceBtn.onclick = async () => {
-        openMultiSelect(node, { replace: true });
-    };
-    addBtn.onclick = async () => {
+    uploadBtn.onclick = async () => {
         openMultiSelect(node, { replace: false });
     };
+
+    // 粘贴图片功能
+    pasteBtn.onclick = async () => {
+        try {
+            const clipboardItems = await navigator.clipboard.read();
+            const imageFiles = [];
+            for (const item of clipboardItems) {
+                for (const type of item.types) {
+                    if (type.startsWith("image/")) {
+                        const blob = await item.getType(type);
+                        const ext = type.split("/")[1] || "png";
+                        const timestamp = Date.now();
+                        const file = new File([blob], `paste_${timestamp}.${ext}`, { type });
+                        imageFiles.push(file);
+                    }
+                }
+            }
+            if (imageFiles.length > 0) {
+                await uploadFilesSequential(node, imageFiles, { replace: false });
+            } else {
+                alert("剪贴板中没有图片，请先复制图片");
+            }
+        } catch (err) {
+            alert("无法读取剪贴板，请确保已复制图片并授予剪贴板权限");
+        }
+    };
+
     folderBtn.onclick = async () => {
-        openFolderSelect(node, { replace: true });
+        openFolderSelect(node, { replace: false });
     };
     queueBtn.onclick = async () => {
         await queueAllSequential(node);
@@ -563,15 +782,19 @@ function createBrowserUI(node) {
         await queueCurrent(node);
     };
     clearBtn.onclick = () => {
+        const indexWidget = getWidgetByName(node, "index");
+        if (indexWidget) {
+            indexWidget.value = 0;
+            indexWidget.callback?.(0);
+        }
         setImageList(node, []);
-        redraw();
     };
 
     container.appendChild(btnRow);
     container.appendChild(info);
     container.appendChild(grid);
 
-    return { container, redraw, setDragging };
+    return { container, redraw, setDragging, updateSelectedCell };
 }
 
 app.registerExtension({
@@ -620,6 +843,15 @@ app.registerExtension({
                 };
             }
 
+            const indexWidget = getWidgetByName(this, "index");
+            if (indexWidget) {
+                const origIndexCallback = indexWidget.callback;
+                indexWidget.callback = function (value) {
+                    origIndexCallback?.call(this, value);
+                    ui.updateSelectedCell();
+                };
+            }
+
             ui.redraw();
 
             return r;
@@ -628,7 +860,7 @@ app.registerExtension({
         const origOnExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (output) {
             origOnExecuted?.apply(this, arguments);
-            this._batchLoadImagesUI?.redraw?.();
+            this._batchLoadImagesUI?.updateSelectedCell?.();
         };
     },
 });
