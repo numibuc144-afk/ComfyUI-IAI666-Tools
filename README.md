@@ -10,6 +10,12 @@
 - **逐一生成结果**：执行时依次生成每张图片，便于调试和结果管理
 - **前端界面集成**：提供简洁的 Web 界面，方便查看任务队列和进度
 
+## 🖼️ 节点预览
+
+<p align="center">
+  <img src="docs/images/batch-load-images-demo.gif" alt="BatchLoadImages 节点操作演示" width="1000">
+</p>
+
 ---
 
 ## 📦 本次更新（v1.1.0，相较 v1.0.1）
