@@ -2,8 +2,6 @@
 
 一个用于批量处理提示词、批量创建任务并逐一生成结果的 ComfyUI 自定义节点集合。
 
-感谢 B 站 UP 主 **AICoser 小姐姐** 原创节点和教学视频
-
 ---
 
 ## 🌟 功能特性
@@ -41,7 +39,6 @@
 ### 🔄 兼容性
 
 - 保持 `image_list`、`max_images`、`mode`、`index` 参数及输出接口不变，现有工作流无需重新连线
-- 如果安装过独立旧版 `ComfyUI-IAI666-BatchLoadImages`，需将其移出 `custom_nodes`，避免同名节点加载旧界面
 
 ---
 
@@ -77,8 +74,6 @@ if index is None:
 1. 下载本仓库
 2. 将文件夹放入 `ComfyUI/custom_nodes/` 目录
 3. 重启 ComfyUI
-
-> 升级提示：如果曾安装独立旧版 `ComfyUI-IAI666-BatchLoadImages`，请先将其移出 `custom_nodes`。新旧插件会注册同名节点，可能导致新版节点仍显示旧界面。
 
 ### 方法二：ComfyUI Manager
 
@@ -232,6 +227,13 @@ ForLoopEnd
 3. **循环节点兼容**：本节点支持与 `comfyui-easy-use` 的 For/While 循环节点配合使用
 
 ## 📝 更新日志
+
+### v1.1.0（by numibuc144-afk）
+- 新增剪贴板图片上传和缩略图拖拽排序
+- 支持单击缩略图选择单张图片，排序或删除后自动同步 `index`
+- 精简批量图片节点工具栏，上传与选择文件夹默认追加图片
+- 图片网格自适应节点空间，缩略图完整显示并支持懒加载
+- 减少图片列表操作后的重复重绘
 
 ### v1.0.1（by numibuc144-afk）
 - 修复 `VALIDATE_INPUTS`、`load_images`、`IS_CHANGED` 方法中 `index` 参数为 `None` 时的崩溃问题
