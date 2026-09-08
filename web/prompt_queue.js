@@ -1,7 +1,7 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-const IAI666_PROMPTQUEUE_UI_VER = "2026-02-09-14";
+const IAI666_PROMPTQUEUE_UI_VER = "2026-09-08-5";
 console.info("[PromptQueue] loaded", { ver: IAI666_PROMPTQUEUE_UI_VER });
 
 const _iai666PromptIdToText = new Map();
@@ -2151,6 +2151,11 @@ async function queueAllPromptsSequential(node) {
 }
 
 function createPromptQueueUI(node) {
+    const promptReorderMime = "application/x-iai666-prompt-index";
+    let draggedCard = null;
+    let dragFromIndex = null;
+    let dropIndicator = null;
+
     const wPrompts = getPromptsJsonWidget(node);
     if (!wPrompts) return null;
 
@@ -2162,7 +2167,7 @@ function createPromptQueueUI(node) {
     const container = document.createElement("div");
     container.dataset.iai666Promptqueue = "1";
     container.style.cssText =
-        "width:100%;padding:8px;background:var(--comfy-menu-bg);border:1px solid var(--border-color);border-radius:6px;margin:5px 0;pointer-events:auto;";
+        "width:100%;height:100%;min-height:240px;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;padding:4px 8px 8px;background:transparent;border:none;margin:0;pointer-events:auto;";
 
     const btnRow = document.createElement("div");
     btnRow.style.cssText = "display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;";
@@ -2256,11 +2261,12 @@ function createPromptQueueUI(node) {
     backendWrap.appendChild(backendTable);
 
     const body = document.createElement("div");
-    body.style.cssText = "display:flex;flex-direction:column;gap:8px;";
+    body.style.cssText = "display:flex;flex:1 1 0;min-height:0;flex-direction:column;gap:8px;overflow:hidden;";
 
     const listWrap = document.createElement("div");
     listWrap.style.cssText =
-        "display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;height:260px;overflow:auto;background:var(--comfy-input-bg);padding:6px;border-radius:4px;border:1px solid var(--border-color);";
+        "display:grid;flex:1 1 0;min-height:160px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));grid-auto-rows:minmax(142px,auto);align-content:stretch;align-items:stretch;gap:8px;overflow:auto;background:transparent;padding:0;border:none;";
+    listWrap.setAttribute("role", "list");
 
     const listBtnRow = document.createElement("div");
     listBtnRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
@@ -2273,39 +2279,172 @@ function createPromptQueueUI(node) {
     listBtnRow.appendChild(importSingleTxtBtn);
     listBtnRow.appendChild(importFolderBtn);
 
+    const getPromptMoveTarget = (length, fromIndex, insertIndex) => {
+        if (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex >= length) return fromIndex;
+        let target = Math.max(0, Math.min(Number(insertIndex) || 0, length));
+        if (fromIndex < target) target -= 1;
+        return Math.max(0, Math.min(target, length - 1));
+    };
+
+    const getIndexAfterPromptMove = (index, fromIndex, targetIndex) => {
+        if (!Number.isInteger(index)) return index;
+        if (index === fromIndex) return targetIndex;
+        if (fromIndex < index && index <= targetIndex) return index - 1;
+        if (targetIndex <= index && index < fromIndex) return index + 1;
+        return index;
+    };
+
+    const clearDropIndicator = () => {
+        if (dropIndicator?.card) dropIndicator.card.style.boxShadow = "";
+        dropIndicator = null;
+        listWrap.style.outline = "";
+    };
+
+    const showDropIndicator = (card, side) => {
+        if (dropIndicator?.card === card && dropIndicator?.side === side) return;
+        clearDropIndicator();
+        card.style.boxShadow = side === "after" ? "inset -4px 0 #4caf7a" : "inset 4px 0 #4caf7a";
+        dropIndicator = { card, side };
+    };
+
+    const finishReorderDrag = () => {
+        clearDropIndicator();
+        if (draggedCard) draggedCard.style.opacity = "";
+        draggedCard = null;
+        dragFromIndex = null;
+    };
+
+    const commitReorder = (fromIndex, insertIndex) => {
+        const items = getPromptsFromWidget(node);
+        if (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex >= items.length) {
+            finishReorderDrag();
+            return;
+        }
+
+        const targetIndex = getPromptMoveTarget(items.length, fromIndex, insertIndex);
+        const next = Array.from(items);
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(targetIndex, 0, moved);
+        finishReorderDrag();
+        if (targetIndex === fromIndex) return;
+
+        const indexWidget = getWidgetByName(node, "index");
+        if (indexWidget) {
+            const selectedIndex = Number(indexWidget.value);
+            if (Number.isInteger(selectedIndex)) {
+                indexWidget.value = getIndexAfterPromptMove(selectedIndex, fromIndex, targetIndex);
+                indexWidget.callback?.(indexWidget.value);
+            }
+        }
+
+        setPromptsJson(node, next);
+        redraw();
+    };
+
     const renderCards = (items, { readonly = false } = {}) => {
         listWrap.innerHTML = "";
         const frag = document.createDocumentFragment();
         items.forEach((text, idx) => {
             const card = document.createElement("div");
             card.style.cssText =
-                "display:flex;flex-direction:column;gap:6px;padding:6px;background:var(--comfy-menu-bg);border:1px solid var(--border-color);border-radius:6px;";
+                "display:flex;min-width:0;min-height:0;box-sizing:border-box;flex-direction:column;gap:6px;padding:6px;background:var(--comfy-input-bg);border:1px solid var(--border-color);border-radius:6px;transition:opacity .12s ease,box-shadow .12s ease;";
+            card.dataset.promptIndex = String(idx);
+            card.setAttribute("role", "listitem");
 
             const head = document.createElement("div");
-            head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:6px;";
+            head.style.cssText = `display:flex;align-items:center;justify-content:space-between;gap:6px;cursor:${readonly ? "default" : "grab"};user-select:none;`;
+            head.draggable = !readonly;
+            head.title = readonly ? "" : "拖拽调整提示词顺序";
 
             const title = document.createElement("div");
-            title.textContent = `#${idx + 1}`;
-            title.style.cssText = "font-size:12px;opacity:0.85;";
+            title.textContent = "⠿";
+            title.setAttribute("aria-label", "拖拽调整顺序");
+            title.style.cssText = "font-size:16px;opacity:0.75;";
 
             const ta = document.createElement("textarea");
             ta.value = String(text ?? "");
-            ta.placeholder = `提示词 #${idx + 1}（允许空行）`;
+            ta.placeholder = "提示词（允许空行）";
             ta.readOnly = !!readonly;
+            ta.draggable = false;
             ta.style.cssText =
-                "width:100%;min-height:96px;padding:6px;background:var(--comfy-input-bg);color:var(--input-text);border:1px solid var(--border-color);border-radius:4px;resize:vertical;";
+                "width:100%;max-width:100%;min-width:0;min-height:96px;box-sizing:border-box;flex:1 1 auto;padding:4px;background:transparent;color:var(--input-text);border:none;border-radius:0;resize:vertical;overflow:auto;";
 
-            const del = mkBtn("删除");
+            // Keep textarea editing/resizing inside the DOM widget instead of letting the canvas drag the node.
+            ta.addEventListener("pointerdown", (e) => e.stopPropagation());
+            ta.addEventListener("mousedown", (e) => e.stopPropagation());
+
+            const del = mkBtn("×");
+            del.title = "删除";
+            del.setAttribute("aria-label", "删除提示词");
             del.style.flex = "0 0 auto";
-            del.style.padding = "6px 10px";
+            del.style.width = "26px";
+            del.style.height = "26px";
+            del.style.padding = "0";
+            del.style.fontSize = "18px";
+            del.style.lineHeight = "1";
             del.style.display = readonly ? "none" : "";
+            del.draggable = false;
             del.onclick = (e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 const next = getPromptsFromWidget(node);
                 next.splice(idx, 1);
+
+                const indexWidget = getWidgetByName(node, "index");
+                if (indexWidget) {
+                    const selectedIndex = Number(indexWidget.value);
+                    if (Number.isInteger(selectedIndex)) {
+                        const nextIndex = selectedIndex > idx ? selectedIndex - 1 : Math.min(selectedIndex, next.length - 1);
+                        indexWidget.value = Math.max(0, nextIndex);
+                        indexWidget.callback?.(indexWidget.value);
+                    }
+                }
+
                 setPromptsJson(node, next);
                 redraw();
             };
+
+            if (!readonly) {
+                head.addEventListener("dragstart", (e) => {
+                    if (e.target?.closest?.("button")) {
+                        e.preventDefault();
+                        return;
+                    }
+                    dragFromIndex = idx;
+                    draggedCard = card;
+                    if (e.dataTransfer) {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData(promptReorderMime, String(idx));
+                        e.dataTransfer.setData("text/plain", String(text ?? ""));
+                    }
+                    requestAnimationFrame(() => {
+                        if (draggedCard === card) card.style.opacity = "0.45";
+                    });
+                });
+
+                head.addEventListener("dragend", finishReorderDrag);
+
+                card.addEventListener("dragover", (e) => {
+                    if (dragFromIndex === null || isFilesDragEvent(e)) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+                    const rect = card.getBoundingClientRect();
+                    const side = e.clientX >= rect.left + rect.width / 2 ? "after" : "before";
+                    showDropIndicator(card, side);
+                });
+
+                card.addEventListener("drop", (e) => {
+                    if (dragFromIndex === null || isFilesDragEvent(e)) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const encodedIndex = e.dataTransfer?.getData(promptReorderMime);
+                    const fromIndex = encodedIndex === "" ? dragFromIndex : Number(encodedIndex);
+                    const rect = card.getBoundingClientRect();
+                    const insertAfter = e.clientX >= rect.left + rect.width / 2;
+                    commitReorder(fromIndex, idx + (insertAfter ? 1 : 0));
+                });
+            }
 
             if (!readonly) {
                 ta.addEventListener("input", () => {
@@ -2326,9 +2465,39 @@ function createPromptQueueUI(node) {
         listWrap.appendChild(frag);
     };
 
+    const isAfterLastCard = (e) => {
+        const lastCard = listWrap.lastElementChild;
+        if (!lastCard) return false;
+        const rect = lastCard.getBoundingClientRect();
+        return e.clientY > rect.bottom || (e.clientY >= rect.top && e.clientX > rect.right);
+    };
+
+    listWrap.addEventListener("dragover", (e) => {
+        if (dragFromIndex === null || isFilesDragEvent(e) || e.target !== listWrap) return;
+        if (!isAfterLastCard(e)) {
+            clearDropIndicator();
+            return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        clearDropIndicator();
+        listWrap.style.outline = "2px dashed #4caf7a";
+        listWrap.style.outlineOffset = "-2px";
+    });
+
+    listWrap.addEventListener("drop", (e) => {
+        if (dragFromIndex === null || isFilesDragEvent(e) || e.target !== listWrap || !isAfterLastCard(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const encodedIndex = e.dataTransfer?.getData(promptReorderMime);
+        const fromIndex = encodedIndex === "" ? dragFromIndex : Number(encodedIndex);
+        commitReorder(fromIndex, getPromptsFromWidget(node).length);
+    });
+
     const updateInfo = () => {
         const items = getPromptsFromWidget(node);
-        info.textContent = `共 ${items.length} 条提示词（可拖拽txt到此面板） v${IAI666_PROMPTQUEUE_UI_VER}`;
+        info.textContent = `共 ${items.length} 条提示词（拖拽卡片标题可排序；可拖拽txt到此面板） v${IAI666_PROMPTQUEUE_UI_VER}`;
     };
 
     const redraw = () => {
@@ -2400,15 +2569,12 @@ function createPromptQueueUI(node) {
 
     const applyAutoLayout = () => {
         const rect = container.getBoundingClientRect?.();
-        const h = rect?.height;
-        if (!h || typeof h !== "number") return;
+        const width = rect?.width;
+        if (!width || typeof width !== "number") return;
 
-        // Estimate header space (buttons + info + paddings). Keep a minimum so UI doesn't collapse.
-        const reserved = 150;
-        const avail = Math.max(160, Math.floor(h - reserved));
-
-        // listWrap is used for card editor and/or preview.
-        listWrap.style.height = `${Math.min(520, avail)}px`;
+        // Match ImageQueue's responsive grid: narrower nodes use smaller cards while wider nodes add columns.
+        const minCardWidth = width < 520 ? 180 : 220;
+        listWrap.style.gridTemplateColumns = `repeat(auto-fill,minmax(${minCardWidth}px,1fr))`;
     };
 
     const readTxtFile = (file) =>
@@ -2587,17 +2753,18 @@ function createPromptQueueUI(node) {
         if (!isFilesDragEvent(e)) return;
         e.preventDefault();
         e.stopPropagation();
-        container.style.border = "2px dashed #4a6";
+        container.style.outline = "2px dashed #4a6";
+        container.style.outlineOffset = "-2px";
     });
     container.addEventListener("dragleave", (e) => {
         if (!isFilesDragEvent(e)) return;
-        container.style.border = "1px solid var(--border-color)";
+        container.style.outline = "none";
     });
     container.addEventListener("drop", async (e) => {
         if (!isFilesDragEvent(e)) return;
         e.preventDefault();
         e.stopPropagation();
-        container.style.border = "1px solid var(--border-color)";
+        container.style.outline = "none";
         const files = Array.from(e.dataTransfer?.files || []);
         await handleDropTxtFiles(files);
     });
@@ -2624,6 +2791,29 @@ function createPromptQueueUI(node) {
     };
 }
 
+function schedulePromptQueueHydratedRedraw(node) {
+    if (!node) return;
+
+    try {
+        node._iai666PromptQueueRedrawCancel?.();
+    } catch {
+        // ignore stale redraw cancellation failures
+    }
+
+    const refresh = () => {
+        node._iai666PromptQueueRedrawCancel = null;
+        node._promptQueueUI?.redraw?.();
+    };
+
+    if (typeof requestAnimationFrame === "function") {
+        const frameId = requestAnimationFrame(refresh);
+        node._iai666PromptQueueRedrawCancel = () => cancelAnimationFrame(frameId);
+    } else {
+        const timerId = setTimeout(refresh, 0);
+        node._iai666PromptQueueRedrawCancel = () => clearTimeout(timerId);
+    }
+}
+
 app.registerExtension({
     name: "IAI666.PromptQueue.Extension",
     customWidgets: {},
@@ -2639,10 +2829,23 @@ app.registerExtension({
                 this._promptQueueUI = ui;
                 this.addDOMWidget("prompt_queue", "customwidget", ui.container);
                 this.setSize([560, 420]);
+                schedulePromptQueueHydratedRedraw(this);
             }
 
             return r;
         };
+
+        // Workflow loading restores widgets after node creation. Redraw on the next frame so the
+        // DOM editor reads the hydrated prompts_json value instead of keeping the temporary default [].
+        if (!nodeType.prototype.__iai666HookedOnConfigureRedraw) {
+            nodeType.prototype.__iai666HookedOnConfigureRedraw = true;
+            const origOnConfigure = nodeType.prototype.onConfigure;
+            nodeType.prototype.onConfigure = function () {
+                const r = origOnConfigure?.apply(this, arguments);
+                schedulePromptQueueHydratedRedraw(this);
+                return r;
+            };
+        }
 
         // Strong hook: make sure onExecuted stays wrapped even if other extensions overwrite it later.
         if (!nodeType.prototype.__iai666HookedOnExecuted) {
@@ -2713,6 +2916,8 @@ app.registerExtension({
         const origOnRemoved = nodeType.prototype.onRemoved;
         nodeType.prototype.onRemoved = function () {
             try {
+                this._iai666PromptQueueRedrawCancel?.();
+                this._iai666PromptQueueRedrawCancel = null;
                 _iai666GlobalSequentialNodeIds.delete(String(this?.id));
                 _iai666PendingAutoExpandNodeIds.delete(String(this?.id));
                 _clearRunCtx(String(this?.id));

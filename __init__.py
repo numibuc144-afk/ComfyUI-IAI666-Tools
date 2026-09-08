@@ -10,7 +10,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "BatchLoadImages": "ComfyUI-IAI666-Tools",
+    "BatchLoadImages": "ComfyUI-IAI666-ImageQueue",
     "PromptQueue": "ComfyUI-IAI666-PromptQueue",
     "IAI666_TextList": "ComfyUI-IAI666-TextList",
     "IAI666_SplitLines": "ComfyUI-IAI666-SplitLines",

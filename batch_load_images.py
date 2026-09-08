@@ -31,8 +31,8 @@ class BatchLoadImages:
 
     CATEGORY = "ComfyUI-IAI666-Tools"
 
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("images", "filenames")
+    RETURN_TYPES = ("IMAGE", "STRING", "INT")
+    RETURN_NAMES = ("images", "filenames", "total")
     FUNCTION = "load_images"
 
     def load_images(self, image_list: str, max_images: int, mode: str, index: int):
@@ -43,6 +43,8 @@ class BatchLoadImages:
 
         if max_images and max_images > 0:
             names = names[:max_images]
+
+        total = len(names)
 
         if mode == "single":
             if index < 0:
@@ -102,7 +104,7 @@ class BatchLoadImages:
             raise ValueError("No valid images found")
 
         output_image = torch.cat(output_images, dim=0)
-        return (output_image, "\n".join(output_names))
+        return (output_image, "\n".join(output_names), int(total))
 
     @classmethod
     def IS_CHANGED(s, image_list: str, max_images: int, mode: str, index: int):
@@ -192,6 +194,9 @@ class PromptQueue:
     FUNCTION = "get_prompt"
 
     def get_prompt(self, prompts_json: str, index: int, prompts=None):
+        if index is None:
+            index = 0
+
         items = None
         upstream_missing = False
 
@@ -241,6 +246,9 @@ class PromptQueue:
 
     @classmethod
     def IS_CHANGED(cls, prompts_json: str, index: int, prompts=None):
+        if index is None:
+            index = 0
+
         m = hashlib.sha256()
         if prompts is not None:
             if isinstance(prompts, list):
@@ -254,6 +262,9 @@ class PromptQueue:
 
     @classmethod
     def VALIDATE_INPUTS(cls, prompts_json: str, index: int, prompts=None):
+        if index is None:
+            index = 0
+
         if prompts is not None:
             # If upstream is dynamically connected (e.g. llama), ComfyUI may validate with an empty string
             # before the upstream node actually produces text. In that case, skip validation here.

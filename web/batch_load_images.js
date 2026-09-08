@@ -495,7 +495,7 @@ function createBrowserUI(node) {
 
     const updateInfo = () => {
         const names = parseImageList(getImageListWidget(node)?.value);
-        info.textContent = `已选择 ${names.length} 张（拖拽缩略图可排序）`;
+        info.textContent = `已选择 ${names.length} 张（拖拽图片卡片可排序）`;
     };
 
     const updateSelectedCell = () => {
@@ -509,7 +509,7 @@ function createBrowserUI(node) {
     };
 
     const clearDropIndicator = () => {
-        if (dropIndicator?.cell) dropIndicator.cell.style.boxShadow = "";
+        dropIndicator?.marker?.remove?.();
         dropIndicator = null;
         grid.style.outline = "";
     };
@@ -517,8 +517,11 @@ function createBrowserUI(node) {
     const showDropIndicator = (cell, side) => {
         if (dropIndicator?.cell === cell && dropIndicator?.side === side) return;
         clearDropIndicator();
-        cell.style.boxShadow = side === "after" ? "inset -4px 0 #4caf7a" : "inset 4px 0 #4caf7a";
-        dropIndicator = { cell, side };
+        const marker = document.createElement("div");
+        marker.style.cssText =
+            `position:absolute;z-index:20;top:0;bottom:0;width:4px;pointer-events:none;background:#4caf7a;border-radius:2px;${side === "after" ? "right:-2px;" : "left:-2px;"}`;
+        cell.appendChild(marker);
+        dropIndicator = { cell, side, marker };
     };
 
     const finishReorderDrag = () => {
@@ -553,10 +556,10 @@ function createBrowserUI(node) {
         names.forEach((name, idx) => {
             const cell = document.createElement("div");
             cell.style.cssText =
-                "display:flex;min-width:0;min-height:0;flex-direction:column;gap:3px;cursor:grab;user-select:none;transition:opacity .12s ease,box-shadow .12s ease;";
+                "position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;gap:3px;cursor:grab;user-select:none;transition:opacity .12s ease;";
             cell.draggable = true;
             cell.dataset.imageIndex = String(idx);
-            cell.title = `拖拽调整顺序：${name}`;
+            cell.title = `拖拽图片卡片调整顺序：${name}`;
             cell.setAttribute("role", "option");
 
             cell.addEventListener("click", (e) => {
@@ -644,7 +647,7 @@ function createBrowserUI(node) {
             label.textContent = name;
             label.title = name;
             label.style.cssText =
-                "font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.9;";
+                "min-width:0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.9;";
 
             thumb.appendChild(img);
             thumb.appendChild(del);
@@ -676,8 +679,7 @@ function createBrowserUI(node) {
         e.preventDefault();
         e.stopPropagation();
         if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-        clearDropIndicator();
-        grid.style.outline = "2px dashed #4caf7a";
+        showDropIndicator(grid.lastElementChild, "after");
     });
 
     grid.addEventListener("drop", (e) => {

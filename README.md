@@ -1,20 +1,59 @@
 # ComfyUI-IAI666-Tools ✨
 
-一个用于批量处理提示词、批量创建任务并逐一生成结果的 ComfyUI 自定义节点集合。
+一个用于管理批量图片与提示词、按索引逐项输出并创建生成队列的 ComfyUI 自定义节点集合。
 
 ---
 
 ## 🌟 功能特性
 - **批量提示词节点**：支持批量加载/处理提示词，避免重复操作
+- **批量图片节点**：支持图片预览、排序、按索引输出及队列总数统计
 - **任务队列管理**：创建多个生成任务，按顺序逐个执行
 - **逐一生成结果**：执行时依次生成每张图片，便于调试和结果管理
 - **前端界面集成**：提供简洁的 Web 界面，方便查看任务队列和进度
 
 ## 🖼️ 节点预览
 
+### ComfyUI-IAI666-ImageQueue
+
 <p align="center">
-  <img src="docs/images/batch-load-images-demo.gif" alt="BatchLoadImages 节点操作演示" width="1000">
+  <img src="docs/images/batch-load-images-demo.gif" alt="ComfyUI-IAI666-ImageQueue 节点操作演示" width="1000">
 </p>
+
+### ComfyUI-IAI666-PromptQueue
+
+<p align="center">
+  <img src="docs/images/prompt-queue-preview.png" alt="ComfyUI-IAI666-PromptQueue 节点预览" width="880">
+</p>
+
+---
+
+## 📦 本次更新（v1.2.0，相较 v1.1.0）
+
+本次更新同时优化图片队列和提示词队列，并修复动态索引在工作流验证阶段可能触发的异常。
+
+### 🖼️ 图片队列
+
+- 节点显示名称调整为 `ComfyUI-IAI666-ImageQueue`，内部类型仍保留 `BatchLoadImages`，兼容已有工作流
+- 新增 `total` 整数输出，返回应用 `max_images` 后的图片队列总数；`single` 模式仍会返回完整队列数量
+- 图片排序支持直接拖拽整张图片卡片，不再显示额外的 `⠿` 拖拽柄
+- 目标卡片左侧或右侧会显示贯穿卡片高度的绿色竖条；排序或删除后，当前 `index` 会继续跟随原先选中的图片
+
+### 📝 提示词队列
+
+- 修复动态连接的 `index` 在验证阶段为 `None` 时引发的 `NoneType` 与整数比较异常
+- 修复加载工作流时提示词卡片偶发显示为 0 条、交互后才重新出现的问题
+- 提示词编辑区随节点宽高自适应，卡片会自动换列，输入框支持纵向拖动调整长度
+- 每条提示词使用单一外框，拖拽 `⠿` 可调整顺序，`×` 用于删除；顺序会持久保存到工作流
+- 排序或删除提示词后，当前 `index` 会尽量继续指向原先选中的提示词
+
+### 🔄 兼容性
+
+- `BatchLoadImages` 内部节点类型未更改，已有工作流无需替换节点
+- `images` 和 `filenames` 仍是前两个输出，新增的 `total` 追加在第三个输出位置
+
+### ⬆️ 更新后操作
+
+本次同时修改了 Python 节点接口和前端脚本。更新文件后请完整重启 ComfyUI 后端，再在浏览器中按 `Ctrl+F5` 强制刷新，以确保新输出端口和新版界面同时生效。
 
 ---
 
@@ -68,7 +107,7 @@ if index is None:
 
 | 节点名称 | 功能 |
 |----------|------|
-| **BatchLoadImages** | 批量加载图片，支持按索引逐张输出 |
+| **ComfyUI-IAI666-ImageQueue**（内部类型 `BatchLoadImages`） | 批量加载图片，支持预览排序、按索引输出及队列总数统计 |
 | **PromptQueue** | 提示词队列，按索引提取提示词 |
 | **IAI666_TextList** | 文本列表组合（最多4个输入合并） |
 | **IAI666_SplitLines** | 文本按行分割 |
@@ -89,7 +128,7 @@ if index is None:
 
 ## 📖 节点说明
 
-### 1. BatchLoadImages（批量加载图片）
+### 1. ComfyUI-IAI666-ImageQueue（内部类型 BatchLoadImages）
 
 从文件名列表中加载图片，支持批量或按索引加载单张。
 
@@ -102,12 +141,22 @@ if index is None:
 | `mode` | batch/single | batch | batch=批量加载，single=按索引加载 |
 | `index` | INT | 0 | single模式下加载第几张（从0开始） |
 
+**前端操作：**
+
+- “上传”和“选择文件夹”会把图片追加到现有队列
+- “粘贴”可读取剪贴板图片并上传到 ComfyUI
+- 单击图片卡片会把该图片位置同步到 `index`
+- 拖拽整张图片卡片可调整顺序；目标卡片左侧或右侧的绿色竖条表示插入位置
+- 红色 `×` 删除图片；排序或删除后，当前 `index` 会尽量继续指向原先选中的图片
+- “单张入队”执行当前索引，“逐张入队”按队列顺序逐项执行
+
 **输出：**
 
 | 输出 | 类型 | 说明 |
 |------|------|------|
 | `images` | IMAGE | 加载的图片 tensor |
 | `filenames` | STRING | 实际加载的图片文件名 |
+| `total` | INT | 应用 `max_images` 后的图片队列总数；`single` 模式仍返回完整队列数量 |
 
 **使用示例：**
 
@@ -125,6 +174,8 @@ index: 2  →  输出上架图-8_0002.png
 index: 3  →  输出上架图-9_0001.png
 ```
 
+以上队列在 `max_images: 0` 时，`total` 输出为 `4`；如果设置 `max_images: 2`，则 `total` 输出为 `2`。
+
 ---
 
 ### 2. PromptQueue（提示词队列）
@@ -138,6 +189,14 @@ index: 3  →  输出上架图-9_0001.png
 | `prompts_json` | STRING | [] | 提示词 JSON 数组（隐藏参数） |
 | `index` | INT | 0 | 提取第几条（从0开始） |
 | `prompts` | STRING | (可选) | 上游直接传入提示词列表 |
+
+**前端操作：**
+
+- 支持新增提示词，以及导入整份 TXT、单个 TXT 或 TXT 文件夹
+- 拖拽卡片标题中的 `⠿` 可调整提示词顺序，`×` 删除当前提示词
+- 输入框可纵向拖动改变高度；卡片会根据节点宽度自动换列
+- “入队当前”只执行当前索引，“逐条入队”按提示词顺序执行全部非空项目
+- “全局执行=逐条入队”启用时，全局运行按钮会触发提示词逐条入队；同一工作流只应启用一个 PromptQueue
 
 **输出：**
 
@@ -207,12 +266,23 @@ index: 2  →  "a mountain landscape"
 ```
 ForLoopStart(总量=4)
     ↓
-BatchLoadImages(mode=single, index=循环索引)
+ComfyUI-IAI666-ImageQueue(mode=single, index=循环索引)
     ↓
 Image Save
     ↓
 ForLoopEnd
 ```
+
+### 图片与提示词一对一处理
+
+将同一个循环整数同时连接到 ImageQueue 和 PromptQueue 的 `index`：
+
+```text
+循环索引 ─┬─→ ImageQueue.index  （图片 0、1、2…）
+          └─→ PromptQueue.index （提示词 0、1、2…）
+```
+
+这样每次循环会得到“图片 0 + 提示词 0、图片 1 + 提示词 1……”的对应关系。PromptQueue 的“全局执行=逐条入队”只负责展开提示词任务，不能代替外部循环同步推进 ImageQueue。
 
 ### 批量循环处理提示词
 
@@ -231,8 +301,17 @@ ForLoopEnd
 1. **图片文件名**：`image_list` 中的文件名需要是 ComfyUI 能识别的路径（通常是 `input/` 目录下的相对路径）
 2. **索引从0开始**：所有 `index` 参数都是从 0 开始计数
 3. **循环节点兼容**：本节点支持与 `comfyui-easy-use` 的 For/While 循环节点配合使用
+4. **队列长度**：一对一循环时，建议使用两个节点 `total` 输出中的较小值作为循环次数，避免较短队列提前到达末尾
 
 ## 📝 更新日志
+
+### v1.2.0（by numibuc144-afk）
+- 图片节点显示名称调整为 `ComfyUI-IAI666-ImageQueue`，并新增 `total` 队列总数输出
+- 图片排序支持整卡拖拽，并使用贯穿目标卡片高度的绿色竖条显示插入位置
+- 修复 PromptQueue 动态 `index=None` 导致的工作流验证异常
+- 修复 PromptQueue 初始化时偶发读取临时空值、提示词卡片需要交互后才显示的问题
+- 提示词编辑区改为响应式布局，支持输入框纵向缩放和卡片拖拽排序
+- 提示词卡片移除可见序号，删除按钮改为 `×`，排序与删除后同步维护当前索引
 
 ### v1.1.0（by numibuc144-afk）
 - 新增剪贴板图片上传和缩略图拖拽排序
